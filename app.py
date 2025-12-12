@@ -39,7 +39,7 @@ loc = get_geolocation()
 if loc:
     st.session_state['lat'] = loc['coords']['latitude']
     st.session_state['lon'] = loc['coords']['longitude']
-    st.sidebar.success("GPS Locked")
+    st.sidebar.success(f"Locked: {loc['coords']['latitude']:.3f}, {loc['coords']['longitude']:.3f}")
 
 st.sidebar.markdown("---")
 
@@ -62,7 +62,6 @@ else: d_lat, d_lon = 29.3013, -94.7977
 dest_lat = st.sidebar.number_input("Dest Latitude", value=d_lat, format="%.4f")
 dest_lon = st.sidebar.number_input("Dest Longitude", value=d_lon, format="%.4f")
 
-st.sidebar.markdown("---")
 speed_knots = st.sidebar.slider("Speed (kts)", 1, 50, 20)
 
 # --- 5. CALCULATIONS ---
@@ -80,50 +79,59 @@ c2.metric("Heading", f"{bearing:.0f}° T")
 c3.metric("ETE", format_duration(eta))
 c4.metric("Speed", f"{speed_knots} kts")
 
-# --- 7. THE NAUTICAL MAP ---
+# --- 7. THE MAP ENGINE ---
 center_lat = (start_lat + dest_lat) / 2
 center_lon = (start_lon + dest_lon) / 2
 
-# A. Create Base Map (ESRI Ocean - Shows Bathymetry/Depth)
-m = folium.Map(location=[center_lat, center_lon], zoom_start=11, tiles=None)
+# We start with the Navigation Charts as the DEFAULT (tiles=None prevents the white background)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles=None)
 
-# B. Add Chart Layers
-# Layer 1: ESRI Ocean Base (Good depth visualization)
+# LAYER 1: World Navigation Charts (The "Paper Chart" Look)
+# This is the most reliable source for chart visuals
 folium.TileLayer(
-    name='Ocean Depth (ESRI)',
-    tiles='https://services.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
-    attr='Esri',
+    tiles="https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri, NOAA",
+    name="Nautical Charts (Standard)",
     overlay=False,
     control=True
 ).add_to(m)
 
-# Layer 2: OpenSeaMap (Adds Buoys, Lights, and Beacons)
+# LAYER 2: Satellite Imagery (For visual reference)
 folium.TileLayer(
-    name='Navigation Aids (OpenSeaMap)',
-    tiles='https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
-    attr='OpenSeaMap',
-    overlay=True,
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri",
+    name="Satellite View",
+    overlay=False,
     control=True
 ).add_to(m)
 
-# Layer 3: NOAA ENC (Official Electronic Charts - WMS)
-# This connects to the NOAA server directly
+# LAYER 3: NOAA ENC (Official Vector Data)
+# Note: This is transparent and overlays on top of others
 folium.WmsTileLayer(
     url='https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/WMSServer',
-    layers='0,1,2,3,4,5,6,7', # Request all standard layers
-    name='NOAA Official ENC',
+    layers='0,1,2,3,4,5,6,7', 
+    name='NOAA Official ENC (Vector)',
     fmt='image/png',
     transparent=True,
     overlay=True,
     control=True
 ).add_to(m)
 
-# C. Plot Course
+# LAYER 4: OpenSeaMap (Buoys & Lights)
+folium.TileLayer(
+    name='Navigation Aids (Buoys)',
+    tiles='https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+    attr='OpenSeaMap',
+    overlay=True,
+    control=True
+).add_to(m)
+
+# Markers & Lines
 folium.Marker([start_lat, start_lon], tooltip="Start", icon=folium.Icon(color="green", icon="play")).add_to(m)
 folium.Marker([dest_lat, dest_lon], tooltip="Dest", icon=folium.Icon(color="red", icon="flag")).add_to(m)
 folium.PolyLine([point_start, point_dest], color="magenta", weight=4, opacity=0.8).add_to(m)
 
-# D. Add Layer Control (To switch charts)
+# Add Layer Control
 folium.LayerControl().add_to(m)
 
 st_folium(m, width=1200, height=600)
