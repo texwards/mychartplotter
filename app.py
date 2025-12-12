@@ -46,7 +46,7 @@ if has_offline:
     # --- OFFLINE MODE ---
     # Streamlit serves the 'static' folder at '/app/static/'
     folium.TileLayer(
-        tiles="/static/tiles/{z}/{x}/{y}.png",  # <--- CHANGED THIS LINE
+        tiles="app/static/tiles/{z}/{x}/{y}.png",  # <--- CHANGED THIS LINE
         attr="Offline Charts",
         name="⚠️ OFFLINE CHARTS (Local)",
         overlay=False,
