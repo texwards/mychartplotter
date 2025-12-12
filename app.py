@@ -5,13 +5,12 @@ from geopy.distance import geodesic
 from streamlit_js_eval import get_geolocation
 import math
 
-# --- 1. SETUP & CONFIGURATION ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Galveston Chartplotter", page_icon="⚓", layout="wide")
 
-# --- 2. SESSION STATE SETUP (Crucial for GPS) ---
-# We use session_state to let the GPS button overwrite the manual inputs
+# --- 2. SESSION STATE ---
 if 'lat' not in st.session_state:
-    st.session_state['lat'] = 29.5500 # Default: Galveston Bay
+    st.session_state['lat'] = 29.5500 # Galveston
 if 'lon' not in st.session_state:
     st.session_state['lon'] = -94.9000
 
@@ -32,53 +31,39 @@ def format_duration(hours):
     return f"{h}h {m}m"
 
 # --- 4. SIDEBAR ---
-st.sidebar.title("🧭 Galveston Nav")
+st.sidebar.title("⚓ Galveston Nav")
 
-# GPS BUTTON
+# GPS
 st.sidebar.write("### 🛰️ Positioning")
 loc = get_geolocation()
-
-# If the button returned data, update our session state variables
 if loc:
     st.session_state['lat'] = loc['coords']['latitude']
     st.session_state['lon'] = loc['coords']['longitude']
-    st.sidebar.success(f"GPS Locked: {loc['coords']['latitude']:.4f}, {loc['coords']['longitude']:.4f}")
+    st.sidebar.success("GPS Locked")
 
 st.sidebar.markdown("---")
 
-# MANUAL INPUTS (Linked to Session State)
+# INPUTS
 st.sidebar.subheader("📍 Start Position")
 start_lat = st.sidebar.number_input("Latitude", key='lat', format="%.4f")
 start_lon = st.sidebar.number_input("Longitude", key='lon', format="%.4f")
 
-# DESTINATION INPUTS
 st.sidebar.subheader("🏁 Destination")
 preset = st.sidebar.selectbox("Quick Select", [
-    "Custom", 
-    "Kemah Boardwalk", 
-    "Red Fish Island", 
-    "Galveston Jetties",
-    "Freeport"
+    "Custom", "Kemah Boardwalk", "Red Fish Island", "Galveston Jetties", "Freeport"
 ])
 
-# Galveston-Specific Defaults
-if preset == "Kemah Boardwalk":
-    d_lat, d_lon = 29.5446, -95.0224
-elif preset == "Red Fish Island":
-    d_lat, d_lon = 29.5150, -94.8850
-elif preset == "Galveston Jetties":
-    d_lat, d_lon = 29.3360, -94.7000
-elif preset == "Freeport":
-    d_lat, d_lon = 28.9430, -95.3000
-else:
-    d_lat, d_lon = 29.3013, -94.7977 # Galveston default
+if preset == "Kemah Boardwalk": d_lat, d_lon = 29.5446, -95.0224
+elif preset == "Red Fish Island": d_lat, d_lon = 29.5150, -94.8850
+elif preset == "Galveston Jetties": d_lat, d_lon = 29.3360, -94.7000
+elif preset == "Freeport": d_lat, d_lon = 28.9430, -95.3000
+else: d_lat, d_lon = 29.3013, -94.7977
 
 dest_lat = st.sidebar.number_input("Dest Latitude", value=d_lat, format="%.4f")
 dest_lon = st.sidebar.number_input("Dest Longitude", value=d_lon, format="%.4f")
 
-# VESSEL SETTINGS
 st.sidebar.markdown("---")
-speed_knots = st.sidebar.slider("Speed (kts)", 1, 50, 15)
+speed_knots = st.sidebar.slider("Speed (kts)", 1, 50, 20)
 
 # --- 5. CALCULATIONS ---
 point_start = (start_lat, start_lon)
@@ -89,25 +74,56 @@ eta = dist / speed_knots if speed_knots > 0 else 0
 
 # --- 6. DISPLAY ---
 st.title("⚓ Galveston Bay Plotter")
-
-# Dashboard
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Distance", f"{dist:.2f} nm")
 c2.metric("Heading", f"{bearing:.0f}° T")
 c3.metric("ETE", format_duration(eta))
 c4.metric("Speed", f"{speed_knots} kts")
 
-# Map
+# --- 7. THE NAUTICAL MAP ---
 center_lat = (start_lat + dest_lat) / 2
 center_lon = (start_lon + dest_lon) / 2
 
-m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+# A. Create Base Map (ESRI Ocean - Shows Bathymetry/Depth)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=11, tiles=None)
 
-# Start Marker (Green for Start)
+# B. Add Chart Layers
+# Layer 1: ESRI Ocean Base (Good depth visualization)
+folium.TileLayer(
+    name='Ocean Depth (ESRI)',
+    tiles='https://services.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
+    attr='Esri',
+    overlay=False,
+    control=True
+).add_to(m)
+
+# Layer 2: OpenSeaMap (Adds Buoys, Lights, and Beacons)
+folium.TileLayer(
+    name='Navigation Aids (OpenSeaMap)',
+    tiles='https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+    attr='OpenSeaMap',
+    overlay=True,
+    control=True
+).add_to(m)
+
+# Layer 3: NOAA ENC (Official Electronic Charts - WMS)
+# This connects to the NOAA server directly
+folium.WmsTileLayer(
+    url='https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/WMSServer',
+    layers='0,1,2,3,4,5,6,7', # Request all standard layers
+    name='NOAA Official ENC',
+    fmt='image/png',
+    transparent=True,
+    overlay=True,
+    control=True
+).add_to(m)
+
+# C. Plot Course
 folium.Marker([start_lat, start_lon], tooltip="Start", icon=folium.Icon(color="green", icon="play")).add_to(m)
-# End Marker (Red for Dest)
 folium.Marker([dest_lat, dest_lon], tooltip="Dest", icon=folium.Icon(color="red", icon="flag")).add_to(m)
-# Line
-folium.PolyLine([point_start, point_dest], color="blue", weight=3, opacity=0.8, dash_array='5').add_to(m)
+folium.PolyLine([point_start, point_dest], color="magenta", weight=4, opacity=0.8).add_to(m)
 
-st_folium(m, width=1200, height=500)
+# D. Add Layer Control (To switch charts)
+folium.LayerControl().add_to(m)
+
+st_folium(m, width=1200, height=600)
