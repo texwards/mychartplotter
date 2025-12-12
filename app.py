@@ -6,35 +6,17 @@ from streamlit_js_eval import get_geolocation
 import math
 import os
 
-# --- 1. CONFIGURATION ---
+# --- 1. SETUP ---
 st.set_page_config(page_title="Galveston Chartplotter", page_icon="⚓", layout="wide")
 
-# --- 2. SESSION STATE ---
 if 'lat' not in st.session_state: st.session_state['lat'] = 29.5500
 if 'lon' not in st.session_state: st.session_state['lon'] = -94.9000
 
-# --- 3. HELPER FUNCTIONS ---
-def calculate_bearing(lat1, lon1, lat2, lon2):
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    dlon = lon2 - lon1
-    x = math.sin(dlon) * math.cos(lat2)
-    y = math.cos(lat1) * math.sin(lat2) - (math.sin(lat1) * math.cos(lat2) * math.cos(dlon))
-    initial_bearing = math.atan2(x, y)
-    initial_bearing = math.degrees(initial_bearing)
-    return (initial_bearing + 360) % 360
-
-def format_duration(hours):
-    if math.isinf(hours): return "N/A"
-    h = int(hours)
-    m = int((hours - h) * 60)
-    return f"{h}h {m}m"
-
-# --- 4. SIDEBAR ---
+# --- 2. SIDEBAR ---
 st.sidebar.title("⚓ Galveston Nav")
 
-# GPS
-st.sidebar.write("### 🛰️ Positioning")
-if st.sidebar.button("Get GPS Location"):
+# GPS Button
+if st.sidebar.button("📡 Get GPS Fix"):
     loc = get_geolocation()
     if loc:
         st.session_state['lat'] = loc['coords']['latitude']
@@ -42,96 +24,71 @@ if st.sidebar.button("Get GPS Location"):
         st.sidebar.success("GPS Locked")
 
 st.sidebar.markdown("---")
+# Quick Jump Presets
+preset = st.sidebar.selectbox("Jump To:", ["Galveston Bay", "Ship Channel (Red Fish)", "The Jetties", "Offshore"])
+if preset == "Galveston Bay": c_lat, c_lon = 29.55, -94.90
+elif preset == "Ship Channel (Red Fish)": c_lat, c_lon = 29.515, -94.885
+elif preset == "The Jetties": c_lat, c_lon = 29.336, -94.700
+elif preset == "Offshore": c_lat, c_lon = 29.100, -94.600
+else: c_lat, c_lon = 29.55, -94.90
 
-# INPUTS
-st.sidebar.subheader("📍 Start Position")
-start_lat = st.sidebar.number_input("Lat", key='lat', format="%.4f")
-start_lon = st.sidebar.number_input("Lon", key='lon', format="%.4f")
+# --- 3. MAP ENGINE ---
+st.title("⚓ Galveston Chartplotter Pro")
 
-st.sidebar.subheader("🏁 Destination")
-preset = st.sidebar.selectbox("Quick Select", [
-    "Custom", "Kemah Boardwalk", "Red Fish Island", "Galveston Jetties", "Freeport"
-])
+m = folium.Map(location=[st.session_state['lat'], st.session_state['lon']], zoom_start=12, tiles=None)
 
-if preset == "Kemah Boardwalk": d_lat, d_lon = 29.5446, -95.0224
-elif preset == "Red Fish Island": d_lat, d_lon = 29.5150, -94.8850
-elif preset == "Galveston Jetties": d_lat, d_lon = 29.3360, -94.7000
-elif preset == "Freeport": d_lat, d_lon = 28.9430, -95.3000
-else: d_lat, d_lon = 29.3013, -94.7977
+# CHECK FOR OFFLINE TILES
+# The path must be relative to where the command is run
+offline_path = "static/tiles"
+has_offline = os.path.exists(offline_path)
 
-dest_lat = st.sidebar.number_input("Dest Lat", value=d_lat, format="%.4f")
-dest_lon = st.sidebar.number_input("Dest Lon", value=d_lon, format="%.4f")
-
-speed_knots = st.sidebar.slider("Speed (kts)", 1, 50, 20)
-
-# --- 5. CALCULATIONS ---
-point_start = (start_lat, start_lon)
-point_dest = (dest_lat, dest_lon)
-dist = geodesic(point_start, point_dest).nm
-bearing = calculate_bearing(start_lat, start_lon, dest_lat, dest_lon)
-eta = dist / speed_knots if speed_knots > 0 else 0
-
-# --- 6. DISPLAY ---
-st.title("⚓ Galveston Bay Plotter")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Distance", f"{dist:.2f} nm")
-c2.metric("Heading", f"{bearing:.0f}° T")
-c3.metric("ETE", format_duration(eta))
-c4.metric("Speed", f"{speed_knots} kts")
-
-# --- 7. THE CHART ENGINE ---
-center_lat = (start_lat + dest_lat) / 2
-center_lon = (start_lon + dest_lon) / 2
-
-m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles=None)
-
-# --- LAYER 1: USACE IENC (Best for Ship Channel/Galveston) ---
-# This serves high-detail channel data
-folium.WmsTileLayer(
-    url='https://ienc-report.usace.army.mil/arcgis/rest/services/IENC/IENC_WMS/MapServer/WMSServer',
-    layers='0,1,2,3,4,5', # Requesting channel details
-    name='USACE Ship Channel (Detail)',
-    fmt='image/png',
-    transparent=False, # Set to False to see the full chart background
-    control=True
-).add_to(m)
-
-# --- LAYER 2: LOCAL TILES (Only works if folder exists) ---
-# NOTE: To use this, create a folder named 'static/tiles' and put your /{z}/{x}/{y}.png files there
-local_tiles_exist = os.path.exists("static/tiles")
-
-if local_tiles_exist:
+if has_offline:
+    # --- OFFLINE MODE ---
+    # This uses the tiles you downloaded with the script
     folium.TileLayer(
-        tiles="/app/static/tiles/{z}/{x}/{y}.png",
-        attr="Local Charts",
-        name="Downloaded Charts (Offline)",
+        tiles="/app/static/tiles/{z}/{x}/{y}.png", # Docker path for Streamlit Cloud
+        attr="Offline Charts",
+        name="⚠️ OFFLINE CHARTS (Local)",
         overlay=False,
         control=True
     ).add_to(m)
-    st.sidebar.success("📂 Local Tiles Detected!")
+    st.success(f"📂 Offline Charts Loaded from {offline_path}")
 else:
-    # Fallback to World Navigation Charts
+    # --- ONLINE MODE (The High-Detail Feed) ---
+    # 1. World Nav Charts (Base Paper Look)
     folium.TileLayer(
         tiles="https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri",
-        name="World Nav Charts (Backup)",
+        attr="Esri / NOAA",
+        name="Nautical Charts (Paper Style)",
         overlay=False,
         control=True
     ).add_to(m)
 
-# Navigation Aids (Overlay)
+    # 2. NOAA Raster Replacement (The "Official" Look)
+    folium.WmsTileLayer(
+        url='https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/MapServer',
+        layers='0,1,2,3',
+        name='NOAA Official (WMS)',
+        fmt='image/png',
+        transparent=True,
+        overlay=True,
+        control=True
+    ).add_to(m)
+
+# 3. Satellite Hybrid (Always good to have)
 folium.TileLayer(
-    name='Buoys & Lights',
-    tiles='https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
-    attr='OpenSeaMap',
-    overlay=True,
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri",
+    name="Satellite Photo",
+    overlay=False,
     control=True
 ).add_to(m)
 
-# Course Lines
-folium.Marker([start_lat, start_lon], tooltip="Start", icon=folium.Icon(color="green", icon="play")).add_to(m)
-folium.Marker([dest_lat, dest_lon], tooltip="Dest", icon=folium.Icon(color="red", icon="flag")).add_to(m)
-folium.PolyLine([point_start, point_dest], color="magenta", weight=4, opacity=0.8).add_to(m)
+# Add Marker
+folium.Marker(
+    [st.session_state['lat'], st.session_state['lon']], 
+    icon=folium.Icon(color="red", icon="ship", prefix="fa")
+).add_to(m)
 
 folium.LayerControl().add_to(m)
-st_folium(m, width=1200, height=600)
+st_folium(m, width=1200, height=700)
