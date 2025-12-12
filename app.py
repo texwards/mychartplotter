@@ -44,9 +44,9 @@ has_offline = os.path.exists(offline_path)
 
 if has_offline:
     # --- OFFLINE MODE ---
-    # This uses the tiles you downloaded with the script
+    # Streamlit serves the 'static' folder at '/app/static/'
     folium.TileLayer(
-        tiles="/static/tiles/{z}/{x}/{y}.png", # Docker path for Streamlit Cloud
+        tiles="app/static/tiles/{z}/{x}/{y}.png",  # <--- CHANGED THIS LINE
         attr="Offline Charts",
         name="⚠️ OFFLINE CHARTS (Local)",
         overlay=False,
